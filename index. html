@@ -1,1 +1,269 @@
+#include <Servo.h>
+#include <NewPing.h>
+#include <SoftwareSerial.h> 
+
+// --- IR SENSOR CONFIGURATION ---
+#define LEFT_IR A0
+#define RIGHT_IR A1
+#define WHITE LOW   
+#define BLACK HIGH  
+
+// --- MOTOR SIGNALS (L298N) ---
+#define IN1 8
+#define IN2 9
+#define IN3 4   
+#define IN4 7   
+#define ENA 5   
+#define ENB 6   
+
+// --- ULTRASONIC & SERVO PINS ---
+#define TRIG A4  
+#define ECHO A5  
+#define MAX_DISTANCE 400
+#define SERVO_PIN 3 
+
+// --- DRIVE SPEEDS ---
+#define LF_FORWARD_SPEED 210  
+#define LF_TURN_SPEED 195     
+#define RC_MANUAL_SPEED 220    
+
+Servo myservo; 
+NewPing sonar(TRIG, ECHO, MAX_DISTANCE);
+
+// Setup Software Serial: RX on Pin A2 (HC-05 TX), TX on Pin A3 (HC-05 RX)
+SoftwareSerial bluetooth(A2, A3);
+
+// Mode states: 0 = Manual control, 1 = Line Following, 2 = Obstacle Avoidance
+int currentMode = 1; // Starts in Line Following automatically
+char btCommand = 'S'; 
+
+// ================= ANALOG DISTANCE FUNCTION =================
+int getDistance() {
+  pinMode(A4, OUTPUT);
+  digitalWrite(A4, LOW);
+  delayMicroseconds(2);
+  
+  digitalWrite(A4, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(A4, LOW);
+  
+  pinMode(A5, INPUT);
+  long duration = pulseIn(A5, HIGH, 30000); 
+  
+  int cm = duration / 29 / 2;
+  if (cm <= 0 || cm > 400) cm = 400; 
+  return cm;
+}
+
+// ================= SERVO LOOK ALIVE MOVEMENTS =================
+void moveServoTo(int angle) {
+  myservo.write(angle);
+  delay(400); 
+}
+
+// ================= ACTIVE OBSTACLE AVOIDANCE (OS MODE) =================
+void obstacleAvoidFunction() {
+  stopRobot();
+  delay(200);
+
+  moveBackwardNormal();
+  delay(500);
+  stopRobot();
+  delay(200);
+
+  moveServoTo(170); 
+  int leftDistance = getDistance();
+  delay(100);
+
+  moveServoTo(50); 
+  int rightDistance = getDistance();
+  delay(100);
+
+  moveServoTo(115); 
+
+  if (leftDistance > rightDistance) {
+    turnLeftNormal();
+  } 
+  else {
+    turnRightNormal();
+  }
+
+  moveForwardObstacleMode();
+  delay(500); 
+}
+
+// ================= MOTOR DRIVE ACTIONS =================
+void moveForwardNormal() {
+  analogWrite(ENA, LF_FORWARD_SPEED);
+  analogWrite(ENB, LF_FORWARD_SPEED);
+  digitalWrite(IN1, HIGH);  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH);  digitalWrite(IN4, LOW);
+}
+
+void moveForwardObstacleMode() {
+  analogWrite(ENA, 230); 
+  analogWrite(ENB, 230);
+  digitalWrite(IN1, HIGH);  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH);  digitalWrite(IN4, LOW);
+}
+
+void lineFollowTurnLeft() {
+  analogWrite(ENA, LF_TURN_SPEED);
+  analogWrite(ENB, LF_TURN_SPEED);
+  digitalWrite(IN1, LOW);   digitalWrite(IN2, HIGH); 
+  digitalWrite(IN3, HIGH);  digitalWrite(IN4, LOW);  
+}
+
+void lineFollowTurnRight() {
+  analogWrite(ENA, LF_TURN_SPEED);
+  analogWrite(ENB, LF_TURN_SPEED);
+  digitalWrite(IN1, HIGH);  digitalWrite(IN2, LOW);   
+  digitalWrite(IN3, LOW);   digitalWrite(IN4, HIGH);  
+}
+
+void moveBackwardNormal() {
+  analogWrite(ENA, 180);
+  analogWrite(ENB, 180);
+  digitalWrite(IN1, LOW);   digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, LOW);   digitalWrite(IN4, HIGH);
+}
+
+void stopRobot() {
+  analogWrite(ENA, 0);
+  analogWrite(ENB, 0);
+  digitalWrite(IN1, LOW);   digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW);   digitalWrite(IN4, LOW);
+}
+
+void turnLeftNormal() {
+  analogWrite(ENA, 200);
+  analogWrite(ENB, 200);
+  digitalWrite(IN1, LOW);   digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, HIGH);  digitalWrite(IN4, LOW);
+  delay(600); 
+  stopRobot();
+}
+
+void turnRightNormal() {
+  analogWrite(ENA, 200);
+  analogWrite(ENB, 200);
+  digitalWrite(IN1, HIGH);  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW);   digitalWrite(IN4, HIGH);
+  delay(600); 
+  stopRobot();
+}
+
+// --- RC BLUETOOTH MANUAL CONTROLS ---
+void rcForward() {
+  analogWrite(ENA, RC_MANUAL_SPEED);   analogWrite(ENB, RC_MANUAL_SPEED);
+  digitalWrite(IN1, HIGH);  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH);  digitalWrite(IN4, LOW);
+}
+
+void rcBackward() {
+  analogWrite(ENA, RC_MANUAL_SPEED);   analogWrite(ENB, RC_MANUAL_SPEED);
+  digitalWrite(IN1, LOW);   digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, LOW);   digitalWrite(IN4, HIGH);
+}
+
+void rcLeft() {
+  analogWrite(ENA, RC_MANUAL_SPEED);   analogWrite(ENB, RC_MANUAL_SPEED);
+  digitalWrite(IN1, LOW);   digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, HIGH);  digitalWrite(IN4, LOW);
+}
+
+void rcRight() {
+  analogWrite(ENA, RC_MANUAL_SPEED);   analogWrite(ENB, RC_MANUAL_SPEED);
+  digitalWrite(IN1, HIGH);  digitalWrite(IN2, LOW);   
+  digitalWrite(IN3, LOW);   digitalWrite(IN4, HIGH);
+}
+
+// ================= SETUP INITIALIZATION =================
+void setup() {
+  pinMode(LEFT_IR, INPUT);
+  pinMode(RIGHT_IR, INPUT);
+
+  pinMode(IN1, OUTPUT);   pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);   pinMode(IN4, OUTPUT);
+  pinMode(ENA, OUTPUT);   pinMode(ENB, OUTPUT);
+
+  myservo.attach(SERVO_PIN);
+  myservo.write(115); 
+  
+  bluetooth.begin(9600);
+  
+  stopRobot();
+}
+
+// ================= CORE RUNTIME LOOP =================
+void loop() {
+  // Read incoming Bluetooth signals from the website
+  if (bluetooth.available() > 0) {
+    btCommand = bluetooth.read(); 
+
+    // Explicit Mode Switching Characters from Website Toggles
+    if (btCommand == 'M') {
+      currentMode = 1; // Switch back to Line Follow
+    } 
+    else if (btCommand == 'O') {
+      currentMode = 2; // Switch back to Obstacle Avoidance
+    }
+    // Direction overrides drop back to manual mode 0 immediately
+    else if (btCommand == 'F' || btCommand == 'B' || btCommand == 'R' || btCommand == 'L' || btCommand == 'S') {
+      currentMode = 0; 
+    }
+  }
+
+  // --- EXECUTE CURRENT ACTIVE WORKING MODE ---
+  
+  // 1. MANUAL OVERRIDE DECK
+  if (currentMode == 0) {
+    if (btCommand == 'F') {
+      rcForward();
+    } 
+    else if (btCommand == 'B') {
+      rcBackward();
+    } 
+    else if (btCommand == 'R') {
+      rcRight();
+    } 
+    else if (btCommand == 'L') {
+      rcLeft();
+    } 
+    else if (btCommand == 'S') {
+      stopRobot(); 
+    }
+  }
+  
+  // 2. AUTOMATIC LINE FOLLOWER MODE
+  else if (currentMode == 1) {
+    int L = digitalRead(LEFT_IR);
+    int R = digitalRead(RIGHT_IR);
+
+    if (L == WHITE && R == WHITE) {
+      moveForwardNormal(); 
+    } 
+    else if (L == BLACK && R == WHITE) {
+      lineFollowTurnLeft(); 
+    } 
+    else if (L == WHITE && R == BLACK) {
+      lineFollowTurnRight(); 
+    } 
+    else {
+      moveForwardNormal(); 
+    }
+  }
+  
+  // 3. AUTOMATIC OBSTACLE AVOIDANCE MODE
+  else if (currentMode == 2) {
+    int front = getDistance();
+
+    if (front > 0 && front <= 25) {
+      obstacleAvoidFunction();
+    } 
+    else {
+      moveForwardObstacleMode();
+    }
+  }
+}
 
